@@ -227,10 +227,15 @@ func ConvertFromChatOpenai(request *types.ChatCompletionRequest) (*GeminiChatReq
 			}
 
 			if params, ok := function.Parameters.(map[string]interface{}); ok {
-				if properties, ok := params["properties"].(map[string]interface{}); ok && len(properties) == 0 {
-					function.Parameters = nil
+				iif function.Parameters != nil {
+				function.Parameters = removeAdditionalPropertiesWithDepth(function.Parameters, 0)
+				if params, ok := function.Parameters.(map[string]interface{}); ok {
+					if properties, ok := params["properties"].(map[string]interface{}); ok && len(properties) == 0 {
+						function.Parameters = nil
+					}
 				}
 			}
+
 
 			geminiChatTools.FunctionDeclarations = append(geminiChatTools.FunctionDeclarations, *function)
 		}
@@ -296,16 +301,20 @@ func removeAdditionalPropertiesWithDepth(schema interface{}, depth int) interfac
 		return schema
 	}
 
+	delete(v, "title")
+	delete(v, "additionalProperties")
+	delete(v, "$schema")
+	delete(v, "exclusiveMinimum")
+	delete(v, "exclusiveMaximum")
+	delete(v, "default")
+
 	// 如果type不为object和array，则直接返回
 	if typeVal, exists := v["type"]; !exists || (typeVal != "object" && typeVal != "array") {
 		return schema
 	}
 
-	delete(v, "title")
-
 	switch v["type"] {
 	case "object":
-		delete(v, "additionalProperties")
 		// 处理 properties
 		if properties, ok := v["properties"].(map[string]interface{}); ok {
 			for key, value := range properties {
