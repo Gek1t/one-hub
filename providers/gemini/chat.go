@@ -226,9 +226,12 @@ func ConvertFromChatOpenai(request *types.ChatCompletionRequest) (*GeminiChatReq
 				continue
 			}
 
-			if params, ok := function.Parameters.(map[string]interface{}); ok {
-				if properties, ok := params["properties"].(map[string]interface{}); ok && len(properties) == 0 {
-					function.Parameters = nil
+			if function.Parameters != nil {
+				function.Parameters = cleanGeminiSchema(function.Parameters, 0)
+				if params, ok := function.Parameters.(map[string]interface{}); ok {
+					if properties, ok := params["properties"].(map[string]interface{}); ok && len(properties) == 0 {
+						function.Parameters = nil
+					}
 				}
 			}
 
@@ -278,7 +281,7 @@ func ConvertFromChatOpenai(request *types.ChatCompletionRequest) (*GeminiChatReq
 		geminiRequest.GenerationConfig.ResponseMimeType = "application/json"
 
 		if request.ResponseFormat.JsonSchema != nil && request.ResponseFormat.JsonSchema.Schema != nil {
-			cleanedSchema := removeAdditionalPropertiesWithDepth(request.ResponseFormat.JsonSchema.Schema, 0)
+			cleanedSchema := cleanGeminiSchema(request.ResponseFormat.JsonSchema.Schema, 0)
 			geminiRequest.GenerationConfig.ResponseSchema = cleanedSchema
 		}
 	}
@@ -286,7 +289,7 @@ func ConvertFromChatOpenai(request *types.ChatCompletionRequest) (*GeminiChatReq
 	return &geminiRequest, nil
 }
 
-func removeAdditionalPropertiesWithDepth(schema interface{}, depth int) interface{} {
+func cleanGeminiSchema(schema interface{}, depth int) interface{} {
 	if depth >= 5 {
 		return schema
 	}
@@ -296,32 +299,36 @@ func removeAdditionalPropertiesWithDepth(schema interface{}, depth int) interfac
 		return schema
 	}
 
+	delete(v, "title")
+	delete(v, "additionalProperties")
+	delete(v, "$schema")
+	delete(v, "exclusiveMinimum")
+	delete(v, "exclusiveMaximum")
+	delete(v, "default")
+
 	// 如果type不为object和array，则直接返回
 	if typeVal, exists := v["type"]; !exists || (typeVal != "object" && typeVal != "array") {
 		return schema
 	}
 
-	delete(v, "title")
-
 	switch v["type"] {
 	case "object":
-		delete(v, "additionalProperties")
 		// 处理 properties
 		if properties, ok := v["properties"].(map[string]interface{}); ok {
 			for key, value := range properties {
-				properties[key] = removeAdditionalPropertiesWithDepth(value, depth+1)
+				properties[key] = cleanGeminiSchema(value, depth+1)
 			}
 		}
 		for _, field := range []string{"allOf", "anyOf", "oneOf"} {
 			if nested, ok := v[field].([]interface{}); ok {
 				for i, item := range nested {
-					nested[i] = removeAdditionalPropertiesWithDepth(item, depth+1)
+					nested[i] = cleanGeminiSchema(item, depth+1)
 				}
 			}
 		}
 	case "array":
 		if items, ok := v["items"].(map[string]interface{}); ok {
-			v["items"] = removeAdditionalPropertiesWithDepth(items, depth+1)
+			v["items"] = cleanGeminiSchema(items, depth+1)
 		}
 	}
 
