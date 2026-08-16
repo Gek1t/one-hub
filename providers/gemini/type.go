@@ -64,17 +64,35 @@ type GeminiFileData struct {
 }
 
 type GeminiPart struct {
-	FunctionCall        *GeminiFunctionCall            `json:"functionCall,omitempty"`
-	FunctionResponse    *GeminiFunctionResponse        `json:"functionResponse,omitempty"`
-	Text                string                         `json:"text,omitempty"`
-	InlineData          *GeminiInlineData              `json:"inlineData,omitempty"`
-	FileData            *GeminiFileData                `json:"fileData,omitempty"`
-	ExecutableCode      *GeminiPartExecutableCode      `json:"executableCode,omitempty"`
-	CodeExecutionResult *GeminiPartCodeExecutionResult `json:"codeExecutionResult,omitempty"`
-	Thought             bool                           `json:"thought,omitempty"` // 是否是思考内容
-	ThoughtSignature    json.RawMessage                `json:"thoughtSignature,omitempty"`
-	MediaResolution     json.RawMessage                `json:"mediaResolution,omitempty"`
-	VideoMetadata       json.RawMessage                `json:"videoMetadata,omitempty"`
+	FunctionCall          *GeminiFunctionCall            `json:"functionCall,omitempty"`
+	FunctionResponse      *GeminiFunctionResponse        `json:"functionResponse,omitempty"`
+	Text                  string                         `json:"text,omitempty"`
+	InlineData            *GeminiInlineData              `json:"inlineData,omitempty"`
+	FileData              *GeminiFileData                `json:"fileData,omitempty"`
+	ExecutableCode        *GeminiPartExecutableCode      `json:"executableCode,omitempty"`
+	CodeExecutionResult   *GeminiPartCodeExecutionResult `json:"codeExecutionResult,omitempty"`
+	Thought               bool                           `json:"thought,omitempty"` // 是否是思考内容
+	ThoughtSignature      json.RawMessage                `json:"thoughtSignature,omitempty"`
+	ThoughtSignatureSnake json.RawMessage                `json:"thought_signature,omitempty"`
+	MediaResolution       json.RawMessage                `json:"mediaResolution,omitempty"`
+	VideoMetadata         json.RawMessage                `json:"videoMetadata,omitempty"`
+}
+
+func (p *GeminiPart) GetThoughtSignature() string {
+	var raw json.RawMessage
+	if len(p.ThoughtSignature) > 0 {
+		raw = p.ThoughtSignature
+	} else if len(p.ThoughtSignatureSnake) > 0 {
+		raw = p.ThoughtSignatureSnake
+	}
+	if len(raw) == 0 {
+		return ""
+	}
+	var str string
+	if err := json.Unmarshal(raw, &str); err == nil {
+		return str
+	}
+	return string(raw)
 }
 
 type GeminiPartExecutableCode struct {
@@ -115,7 +133,7 @@ func (candidate *GeminiChatCandidate) ToOpenAIStreamChoice(request *types.ChatCo
 				choice.Delta.ToolCalls = make([]*types.ChatCompletionToolCalls, 0)
 			}
 			isTools = true
-			choice.Delta.ToolCalls = append(choice.Delta.ToolCalls, part.FunctionCall.ToOpenAITool())
+			choice.Delta.ToolCalls = append(choice.Delta.ToolCalls, part.FunctionCall.ToOpenAIToolWithSignature(part.GetThoughtSignature()))
 		} else if part.InlineData != nil {
 			if strings.HasPrefix(part.InlineData.MimeType, "image/") {
 				images = append(images, types.MultimediaData{
@@ -204,7 +222,7 @@ func (candidate *GeminiChatCandidate) ToOpenAIChoice(request *types.ChatCompleti
 				choice.Message.ToolCalls = make([]*types.ChatCompletionToolCalls, 0)
 			}
 			useTools = true
-			choice.Message.ToolCalls = append(choice.Message.ToolCalls, part.FunctionCall.ToOpenAITool())
+			choice.Message.ToolCalls = append(choice.Message.ToolCalls, part.FunctionCall.ToOpenAIToolWithSignature(part.GetThoughtSignature()))
 		} else if part.InlineData != nil {
 			if strings.HasPrefix(part.InlineData.MimeType, "image/") {
 
@@ -285,10 +303,19 @@ type GeminiFunctionResponseContent struct {
 }
 
 func (g *GeminiFunctionCall) ToOpenAITool() *types.ChatCompletionToolCalls {
+	return g.ToOpenAIToolWithSignature("")
+}
+
+func (g *GeminiFunctionCall) ToOpenAIToolWithSignature(thoughtSig string) *types.ChatCompletionToolCalls {
 	args, _ := json.Marshal(g.Args)
+	toolId := "call_" + utils.GetRandomString(24)
+	if thoughtSig != "" {
+		encodedSig := base64.RawURLEncoding.EncodeToString([]byte(thoughtSig))
+		toolId = fmt.Sprintf("%s___TS___%s", toolId, encodedSig)
+	}
 
 	return &types.ChatCompletionToolCalls{
-		Id:    "call_" + utils.GetRandomString(24),
+		Id:    toolId,
 		Type:  types.ChatMessageRoleFunction,
 		Index: 0,
 		Function: &types.ChatCompletionToolCallsFunction{
@@ -444,12 +471,32 @@ func OpenAIToGeminiChatContent(openaiContents []types.ChatCompletionMessage) ([]
 					json.Unmarshal([]byte(toolCall.Function.Arguments), &args)
 				}
 
-				content.Parts = append(content.Parts, GeminiPart{
+				part := GeminiPart{
 					FunctionCall: &GeminiFunctionCall{
 						Name: toolCall.Function.Name,
 						Args: args,
 					},
-				})
+				}
+
+				if strings.Contains(toolCall.Id, "___TS___") {
+					splits := strings.Split(toolCall.Id, "___TS___")
+					if len(splits) == 2 {
+						if sigBytes, err := base64.RawURLEncoding.DecodeString(splits[1]); err == nil {
+							sigStr := string(sigBytes)
+							var raw json.RawMessage
+							if strings.HasPrefix(sigStr, "\"") && strings.HasSuffix(sigStr, "\"") {
+								raw = json.RawMessage(sigStr)
+							} else {
+								quoted, _ := json.Marshal(sigStr)
+								raw = json.RawMessage(quoted)
+							}
+							part.ThoughtSignature = raw
+							part.ThoughtSignatureSnake = raw
+						}
+					}
+				}
+
+				content.Parts = append(content.Parts, part)
 
 			}
 			text := openaiContent.StringContent()
