@@ -615,8 +615,17 @@ func OpenAIToGeminiChatContent(openaiContents []types.ChatCompletionMessage) ([]
 				}
 			}
 		}
-		contents = append(contents, content)
+		if len(content.Parts) > 0 {
+			contents = append(contents, content)
+		}
 
+	}
+
+	if len(contents) == 0 {
+		contents = append(contents, GeminiChatContent{
+			Role:  "user",
+			Parts: []GeminiPart{{Text: " "}},
+		})
 	}
 
 	return contents, strings.Join(systemContent, "\n"), nil
