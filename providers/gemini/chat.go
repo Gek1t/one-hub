@@ -290,7 +290,7 @@ func ConvertFromChatOpenai(request *types.ChatCompletionRequest) (*GeminiChatReq
 }
 
 func cleanGeminiSchema(schema interface{}, depth int) interface{} {
-	if depth >= 5 {
+	if depth >= 20 {
 		return schema
 	}
 
@@ -299,36 +299,63 @@ func cleanGeminiSchema(schema interface{}, depth int) interface{} {
 		return schema
 	}
 
-	delete(v, "title")
-	delete(v, "additionalProperties")
-	delete(v, "$schema")
-	delete(v, "exclusiveMinimum")
-	delete(v, "exclusiveMaximum")
-	delete(v, "default")
-
-	// 如果type不为object和array，则直接返回
-	if typeVal, exists := v["type"]; !exists || (typeVal != "object" && typeVal != "array") {
-		return schema
+	// 转换 exclusiveMinimum 为 minimum
+	if val, exists := v["exclusiveMinimum"]; exists {
+		if _, hasMin := v["minimum"]; !hasMin {
+			v["minimum"] = val
+		}
+		delete(v, "exclusiveMinimum")
+	}
+	if val, exists := v["exclusiveMaximum"]; exists {
+		if _, hasMax := v["maximum"]; !hasMax {
+			v["maximum"] = val
+		}
+		delete(v, "exclusiveMaximum")
 	}
 
-	switch v["type"] {
-	case "object":
-		// 处理 properties
-		if properties, ok := v["properties"].(map[string]interface{}); ok {
-			for key, value := range properties {
-				properties[key] = cleanGeminiSchema(value, depth+1)
+	// 剔除 Google Vertex/Gemini 不支持的非标 JSON Schema 关键字
+	unsupportedKeys := []string{
+		"title",
+		"additionalProperties",
+		"$schema",
+		"$id",
+		"$ref",
+		"$defs",
+		"definitions",
+		"propertyNames",
+		"patternProperties",
+		"default",
+		"examples",
+		"readOnly",
+		"writeOnly",
+		"const",
+	}
+	for _, key := range unsupportedKeys {
+		delete(v, key)
+	}
+
+	// 无论是否有 type，无条件递归处理 properties
+	if properties, ok := v["properties"].(map[string]interface{}); ok {
+		for key, value := range properties {
+			properties[key] = cleanGeminiSchema(value, depth+1)
+		}
+	}
+
+	// 无论是否有 type，无条件递归处理 allOf, anyOf, oneOf
+	for _, field := range []string{"allOf", "anyOf", "oneOf"} {
+		if nested, ok := v[field].([]interface{}); ok {
+			for i, item := range nested {
+				nested[i] = cleanGeminiSchema(item, depth+1)
 			}
 		}
-		for _, field := range []string{"allOf", "anyOf", "oneOf"} {
-			if nested, ok := v[field].([]interface{}); ok {
-				for i, item := range nested {
-					nested[i] = cleanGeminiSchema(item, depth+1)
-				}
-			}
-		}
-	case "array":
-		if items, ok := v["items"].(map[string]interface{}); ok {
-			v["items"] = cleanGeminiSchema(items, depth+1)
+	}
+
+	// 无论是否有 type，无条件递归处理 items
+	if items, ok := v["items"].(map[string]interface{}); ok {
+		v["items"] = cleanGeminiSchema(items, depth+1)
+	} else if itemsList, ok := v["items"].([]interface{}); ok {
+		for i, item := range itemsList {
+			itemsList[i] = cleanGeminiSchema(item, depth+1)
 		}
 	}
 
