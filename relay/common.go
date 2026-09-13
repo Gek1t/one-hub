@@ -147,7 +147,18 @@ func fetchChannel(c *gin.Context, modelName string) (channel *model.Channel, fai
 		return fetchChannelById(channelId)
 	}
 
-	return fetchChannelByModel(c, modelName)
+	channel, fail = fetchChannelByModel(c, modelName)
+	if fail != nil {
+		for _, suffix := range []string{"-high", "-medium", "-low", "-none", "-nothink"} {
+			if strings.HasSuffix(modelName, suffix) {
+				baseModel := strings.TrimSuffix(modelName, suffix)
+				if ch, err := fetchChannelByModel(c, baseModel); err == nil {
+					return ch, nil
+				}
+			}
+		}
+	}
+	return channel, fail
 }
 
 func fetchChannelById(channelId int) (*model.Channel, error) {

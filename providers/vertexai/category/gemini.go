@@ -3,6 +3,7 @@ package category
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"one-api/common"
 	"one-api/common/requester"
 	"one-api/providers/base"
@@ -51,6 +52,11 @@ func GeminiChatCompleteStrem(provider base.ProviderInterface, request *types.Cha
 }
 
 func GetGeminiModelName(modelName string) string {
+	for _, suffix := range []string{"-high", "-medium", "-low", "-none", "-nothink"} {
+		if strings.HasSuffix(modelName, suffix) {
+			return strings.TrimSuffix(modelName, suffix)
+		}
+	}
 	return modelName
 }
 

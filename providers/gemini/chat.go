@@ -176,7 +176,35 @@ func ConvertFromChatOpenai(request *types.ChatCompletionRequest) (*GeminiChatReq
 		geminiRequest.GenerationConfig.ResponseModalities = []string{"AUDIO"}
 	}
 
-	if request.Reasoning != nil {
+	// 解析并注入思考档位（支持通过后缀 -high / -medium / -low / -none / -nothink 控制）
+	thinkingSuffix := ""
+	for _, suffix := range []string{"-high", "-medium", "-low", "-none", "-nothink"} {
+		if strings.HasSuffix(request.Model, suffix) {
+			thinkingSuffix = strings.TrimPrefix(suffix, "-")
+			request.Model = strings.TrimSuffix(request.Model, suffix)
+			break
+		}
+	}
+
+	if thinkingSuffix != "" {
+		if geminiRequest.GenerationConfig.ThinkingConfig == nil {
+			geminiRequest.GenerationConfig.ThinkingConfig = &ThinkingConfig{}
+		}
+		switch thinkingSuffix {
+		case "none", "nothink":
+			zero := 0
+			geminiRequest.GenerationConfig.ThinkingConfig.ThinkingBudget = &zero
+		case "low":
+			geminiRequest.GenerationConfig.ThinkingConfig.ThinkingLevel = "LOW"
+			geminiRequest.GenerationConfig.ThinkingConfig.IncludeThoughts = true
+		case "medium":
+			geminiRequest.GenerationConfig.ThinkingConfig.ThinkingLevel = "MEDIUM"
+			geminiRequest.GenerationConfig.ThinkingConfig.IncludeThoughts = true
+		case "high":
+			geminiRequest.GenerationConfig.ThinkingConfig.ThinkingLevel = "HIGH"
+			geminiRequest.GenerationConfig.ThinkingConfig.IncludeThoughts = true
+		}
+	} else if request.Reasoning != nil {
 		thinkingConfig := &ThinkingConfig{}
 		
 		// Set ThinkingBudget when MaxTokens >= 0
