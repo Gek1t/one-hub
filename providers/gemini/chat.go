@@ -131,6 +131,11 @@ func ConvertFromChatOpenai(request *types.ChatCompletionRequest) (*GeminiChatReq
 	// 	threshold = "OFF"
 	// }
 
+	maxOutputTokens := request.MaxTokens
+	if maxOutputTokens > 65536 {
+		maxOutputTokens = 65536
+	}
+
 	geminiRequest := GeminiChatRequest{
 		Contents: make([]GeminiChatContent, 0, len(request.Messages)),
 		SafetySettings: []GeminiChatSafetySettings{
@@ -158,7 +163,7 @@ func ConvertFromChatOpenai(request *types.ChatCompletionRequest) (*GeminiChatReq
 		GenerationConfig: GeminiChatGenerationConfig{
 			Temperature:        request.Temperature,
 			TopP:               request.TopP,
-			MaxOutputTokens:    request.MaxTokens,
+			MaxOutputTokens:    maxOutputTokens,
 			ResponseModalities: request.Modalities,
 		},
 	}
